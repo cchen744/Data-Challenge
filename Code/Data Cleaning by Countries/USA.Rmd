@@ -1,0 +1,168 @@
+---
+title: "EDA of USA"
+output: html_document
+date: "2024-10-14"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(dplyr)
+library(stringr)
+library(gridExtra)
+
+```
+
+--read data
+
+```{r}
+energy_production <- read.csv('~/desktop/Data Challenge/Data Challenge/Data/Energy Production.csv')
+ev_data <- read.csv('~/desktop/Data Challenge/Data Challenge/Data/EV Data - EV Data.csv')
+ev_chargers <- read_csv('~/desktop/Data Challenge/Data Challenge/Data/EV Charging Stations - EV Chargers.csv')
+```
+# Exploratory Data Analysis (EDA)
+## Cleaning
+**USA**
+###USA_ev_data
+```{r}
+US_ev_data <- ev_data %>% 
+  filter(region=="USA") %>% 
+  select(-category,-mode,-X,-unit)%>% 
+  arrange(parameter,powertrain) %>% 
+  rename("Country"="region")
+
+US_ev_data_by_sale <- US_ev_data %>% 
+  filter(parameter %in% c("EV sales", "EV stock"))
+
+US_ev_data_by_share <- US_ev_data %>% 
+  filter(parameter %in% c("EV stock share", "EV sales share")) # break down data by units (vehicles | percentage)
+
+EV_sale_p1 <- US_ev_data_by_sale %>% filter(parameter == "EV sales") %>% 
+  ggplot(aes(x = year, y = value, color = powertrain, group = powertrain)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  labs(title = "EV Sales by Year (USA)", x = "Year", y = "Sales (Units)", color = "Powertrain") +
+  theme_minimal()
+
+EV_stock_p2 <- US_ev_data_by_sale %>% filter(parameter == "EV stock") %>% 
+  ggplot(aes(x = year, y = value, color = powertrain, group = powertrain)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  labs(title = "EV Stocks by Year (USA)", x = "Year", y = "Stocks (Units)", color = "Powertrain") +
+  theme_minimal()
+
+grid.arrange(EV_sale_p1, EV_stock_p2, nrow = 2)
+```
+
+### USA_electricity_production
+```{r}
+US_electricity_production <- energy_production %>% 
+  filter(Country=="United States",Product=="Electricity") %>% 
+  select(-X) %>% 
+  rename("energy_production"="Value") %>%
+  mutate(Time=case_when(
+           str_detect(Time, '10') ~ 2010,
+           str_detect(Time, '11') ~ 2011,
+           str_detect(Time, '12') ~ 2012,
+           str_detect(Time, '13') ~ 2013,
+           str_detect(Time, '14') ~ 2014,
+           str_detect(Time, '15') ~ 2015,
+           str_detect(Time, '16') ~ 2016,
+           str_detect(Time, '17') ~ 2017,
+           str_detect(Time, '18') ~ 2018,
+           str_detect(Time, '19') ~ 2019,
+           str_detect(Time, '20') ~ 2020,
+           str_detect(Time, '21') ~ 2021)) %>% 
+  group_by(Time) %>% 
+  summarize(Country = "United States",Total_electricity_year = sum(energy_production),Unit = 'GWh') %>% 
+  rename("year"="Time") %>% 
+  mutate(Country = ifelse(Country == "United States", "USA", Country))
+
+US_electricity_production %>% ggplot( aes(x = year, y = Total_electricity_year)) +
+  geom_line(color = "lightseagreen", size = 1) +      
+  geom_point(size = 2, color = "red") +     
+  geom_text(aes(label = round(Total_electricity_year, 1)), vjust = -0.5, size = 3) +  
+  labs(title = "USA's Annual Electricity Production (2010-2021)", 
+       x = "Year", 
+       y = "Energy Production (GWh)") +
+  theme_minimal() 
+  
+```
+
+### USA_ev_chargers
+```{r}
+US_ev_chargers <- ev_chargers %>% 
+  filter(region=="USA") %>% 
+  select(-category,-parameter,-unit,-mode,-...1) %>% 
+  arrange(powertrain) %>% 
+  rename("Country"="region")
+
+US_ev_chargers %>% 
+  ggplot(aes(x = factor(year), y = value, fill = powertrain, group = powertrain)) +
+  geom_bar(stat = "identity", position = "dodge") +  # bar plot
+  geom_point(aes(color = powertrain), size = 2) +
+  geom_line()+
+  labs(title = "USA's Charging Stations by Powertrain (Slow vs Fast)",
+       x = "Year",
+       y = "Number of Charging Stations",
+       fill = "Powertrain",
+       color = "Powertrain") +
+  theme_minimal()+
+  geom_text(data = US_ev_chargers %>% filter(powertrain == "Publicly available fast"),
+            aes(label = value), vjust = -0.5, color = "red", size = 4)
+```
+
+### Merge
+```{r}
+US_merged <- US_ev_data_by_sale %>% 
+  left_join(US_ev_chargers,by=c("Country","year")) %>% 
+  full_join(US_electricity_production,by=c("Country","year")) %>% 
+  rename("# of EV"="value.x","# of charging station"="value.y","EV type"="powertrain.x","charging station type"="powertrain.y") %>% 
+  filter(year %in% 2010:2021)
+```
+
+###Calculate the incluence metric
+```{r}
+US_metric <- US_merged %>% 
+  group_by(year) %>% 
+  reframe(total_ev_sales_per_year = sum(`# of EV`),
+            total_charging_points_per_year = sum(`# of charging station`) ) %>% 
+  mutate(total_electricity_per_year = US_electricity_production$Total_electricity_year,
+         influence_metric = total_electricity_per_year * total_ev_sales_per_year / total_charging_points_per_year)
+
+write.csv(US_metric,"~/Desktop/Data Challenge/Data Challenge/CODE/Metrics/US_metric.csv",row.names = FALSE)
+```
+
+
+## Visualization
+### EV Sales vs Charging Stations
+```{r}
+ggplot(filter(US_merged, `EV type` == "BEV" | `EV type` == "PHEV"),
+       aes(x = `# of charging station`, y = `# of EV`,color = `EV type`)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = T,color="orange") + # choose linear method temporarily
+  labs(title = "EV Sales vs Charging Stations (USA)", x = "Number of Charging Stations", y = "EV Sales") +
+  theme_minimal()
+```
+
+## EV sales vs. Electricity Production
+```{r}
+ggplot(filter(US_merged, `EV type` == "BEV" | `EV type` == "PHEV"), 
+       aes(x = Total_electricity_year, y = `# of EV`,color = `EV type`)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = T,color="seagreen2") +
+  labs(title = "EV Sales vs Electricity Production (USA)", x = "Electricity Production (GWh)", y = "EV Sales") +
+  theme_minimal()
+```
+# Correlation Analysis
+```{r}
+cor_matrix <- cor(filter(US_merged, `EV type` == "BEV" | `EV type` == "PHEV") %>% select(`# of EV`, `# of charging station`, Total_electricity_year), use = "complete.obs")
+print(cor_matrix)
+```
+
+# Regression Analysis
+```{r}
+model <- lm(`# of EV` ~ `# of charging station` + Total_electricity_year, data = filter(US_merged, `EV type` == "BEV" | `EV type` == "PHEV"))
+summary(model)
+```
+

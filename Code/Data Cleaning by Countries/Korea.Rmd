@@ -1,0 +1,90 @@
+---
+title: "Korea"
+output: html_document
+date: "2024-10-25"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(dplyr)
+library(stringr)
+library(gridExtra)
+
+```
+
+--read data
+
+```{r}
+energy_production <- read.csv('~/desktop/Data Challenge/Data Challenge/Data/Energy Production.csv')
+ev_data <- read.csv('~/desktop/Data Challenge/Data Challenge/Data/EV Data - EV Data.csv')
+ev_chargers <- read_csv('~/desktop/Data Challenge/Data Challenge/Data/EV Charging Stations - EV Chargers.csv')
+```
+
+###Korea_ev_data
+```{r}
+Korea_ev_data <- ev_data %>% 
+  filter(region=="Korea") %>% 
+  select(-category,-mode,-X,-unit)%>% 
+  arrange(parameter,powertrain) %>% 
+  rename("Country"="region")
+
+Korea_ev_data_by_sale <- Korea_ev_data %>% 
+  filter(parameter == "EV sales")
+```
+
+###Korea_electricity_production
+```{r}
+Korea_electricity_production <- energy_production %>% 
+  filter(Country=="Korea",Product=="Electricity") %>% 
+  select(-X) %>% 
+  rename("energy_production"="Value") %>%
+  mutate(Time=case_when(
+           str_detect(Time, '10') ~ 2010,
+           str_detect(Time, '11') ~ 2011,
+           str_detect(Time, '12') ~ 2012,
+           str_detect(Time, '13') ~ 2013,
+           str_detect(Time, '14') ~ 2014,
+           str_detect(Time, '15') ~ 2015,
+           str_detect(Time, '16') ~ 2016,
+           str_detect(Time, '17') ~ 2017,
+           str_detect(Time, '18') ~ 2018,
+           str_detect(Time, '19') ~ 2019,
+           str_detect(Time, '20') ~ 2020,
+           str_detect(Time, '21') ~ 2021)) %>% 
+  group_by(Time) %>% 
+  summarize(Country = "Korea",Total_electricity_year = sum(energy_production),Unit = 'GWh') %>% 
+  rename("year"="Time")
+```
+
+###Korea_ev_chargers
+```{r}
+Korea_ev_chargers <- ev_chargers %>% 
+  filter(region=="Korea") %>% 
+  select(-category,-parameter,-unit,-mode,-...1) %>% 
+  arrange(powertrain) %>% 
+  rename("Country"="region")
+```
+
+
+### Merge
+```{r}
+Korea_merged <-Korea_ev_data_by_sale %>% 
+  left_join(Korea_ev_chargers,by=c("Country","year")) %>% 
+  full_join(Korea_electricity_production,by=c("Country","year")) %>% 
+  rename("# of EV"="value.x","# of charging station"="value.y","EV type"="powertrain.x","charging station type"="powertrain.y") %>% 
+  filter(year %in% 2010:2021)
+```
+###Calculate the incluence metric
+```{r}
+Korea_metric <- Korea_merged %>% 
+  group_by(year) %>% 
+  reframe(total_ev_sales_per_year = sum(`# of EV`),
+            total_charging_points_per_year = sum(`# of charging station`) ) %>% 
+  mutate(total_electricity_per_year = Korea_electricity_production$Total_electricity_year,
+         influence_metric = total_electricity_per_year * total_ev_sales_per_year / total_charging_points_per_year)
+
+write.csv(Korea_metric,"~/Desktop/Data Challenge/Data Challenge/CODE/Metrics/Korea_metric.csv",row.names = FALSE)
+```
+
+
