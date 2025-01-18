@@ -1,0 +1,85 @@
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(dplyr)
+
+EV_Data <- read_csv("~/desktop/Data Challenge/Data Challenge/Data/EV Data - EV Data.csv")
+```
+
+**Top countries in EV sales and EV stock**
+
+-   The top 10 countries for both parameters are identical. They are: ***China, USA, Germany, United Kingdom, France, Norway, Netherlands, Japan, Sweden, Canada***.
+-   This ranking is based on comparing the total EV sales and total EV stock across countries. We observe that the same top 10 countries appear in both rankings.
+
+*Top 10 countries of EV sales (excluding 'World','Europe' and 'EU27')*
+
+```{r}
+top10_EV_sales <-
+  EV_Data %>% 
+  group_by(parameter,region) %>% 
+  summarize(total_value = sum(value)) %>% 
+  arrange(desc(total_value))%>% 
+  filter(parameter == "EV sales",!region %in% c('World',"Europe","EU27")) %>% 
+  slice_head(n=30)
+
+top10_EV_sales
+```
+
+*Top 10 countries of EV stock (excluding 'World','Europe' and 'EU27')*
+
+```{r}
+top10_EV_stock <-
+  EV_Data %>% 
+  group_by(parameter,region) %>% 
+  summarize(total_value = sum(value)) %>% 
+  arrange(parameter,desc(total_value))%>% 
+  filter(parameter == "EV stock",!region %in% c('World',"Europe","EU27")) %>% 
+  slice_head(n=10)
+
+top10_EV_stock
+```
+
+```{r}
+# Ensure each country has its own color
+regions <- unique(c(top10_EV_stock$region, top10_EV_sales$region)) 
+custom_palette <- scales::hue_pal()(length(regions))  
+names(custom_palette) <- regions
+```
+
+#barplot for EV sales
+
+```{r}
+ggplot(top10_EV_sales,aes(x=reorder(region, total_value),y=total_value,fill=region))+
+  geom_col()+
+  labs(title = "Top 10 EV Sales by Region",
+       x = "Region",
+       y = "Total EV Sales")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+#barplot for EV stock
+
+```{r}
+ggplot(top10_EV_stock,aes(x=reorder(region, total_value),y=total_value,fill=region))+
+  geom_col()+
+  labs(title = "Top 10 EV Stock by Region",
+       x = "Region",
+       y = "Total EV Stock")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+*calculate EV sales/EV stock*
+
+```{r}
+EV_sales_stock <- top10_EV_stock %>% 
+  inner_join(top10_EV_sales,join_by(region)) %>% 
+  mutate('share(sales/stock)'=total_value.y/total_value.x) %>% 
+  select(region,'share(sales/stock)')
+
+ggplot(EV_sales_stock,aes(x=reorder(region,`share(sales/stock)`),y=`share(sales/stock)`,fill=region))+geom_col()+
+  labs(title = 'Proportion of EV Sales to Total Stock by Region',
+       x = "Region",
+       y = "Sales/Stock Ratio")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```

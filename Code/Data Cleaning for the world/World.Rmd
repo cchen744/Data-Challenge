@@ -1,0 +1,228 @@
+---
+title: "Global"
+output: html_document
+date: "2024-10-25"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(dplyr)
+
+ev_data <- read_csv("~/desktop/Data Challenge/Data Challenge/Data/EV Data - EV Data.csv")
+energy_production <- read_csv("~/desktop/Data Challenge/Data Challenge/Data/Energy Production.csv")
+ev_chargers <- read_csv("~/desktop/Data Challenge/Data Challenge/Data/EV Charging Stations - EV Chargers.csv")
+
+```
+
+#To find the best predictor ##First,calculate the total sales per year of the world
+
+```{r}
+ev_data_by_sales <- ev_data %>% 
+  filter(parameter == 'EV sales') %>% 
+  group_by(year) %>% 
+  summarize(total_sale_per_year = sum(value))
+
+ev_data_by_sales
+```
+
+##Second,calculate the total electricity production of the world per year
+
+```{r}
+total_electricity_by_year <- energy_production %>% 
+  filter(Product=="Electricity") %>% 
+  rename("energy_production"="Value") %>%
+  mutate(Time=case_when(
+           str_detect(Time, '10') ~ 2010,
+           str_detect(Time, '11') ~ 2011,
+           str_detect(Time, '12') ~ 2012,
+           str_detect(Time, '13') ~ 2013,
+           str_detect(Time, '14') ~ 2014,
+           str_detect(Time, '15') ~ 2015,
+           str_detect(Time, '16') ~ 2016,
+           str_detect(Time, '17') ~ 2017,
+           str_detect(Time, '18') ~ 2018,
+           str_detect(Time, '19') ~ 2019,
+           str_detect(Time, '20') ~ 2020,
+           str_detect(Time, '21') ~ 2021)) %>% 
+  group_by(Time) %>% 
+  summarize(total_electricity_per_year = sum(energy_production),Unit = 'GWh') %>% 
+  rename("year"="Time")
+
+total_electricity_by_year
+```
+
+##Third, calculate the total charging points of the world per year.
+
+```{r}
+total_charging_points_by_year <- ev_chargers %>% 
+  select(-category,-parameter,-unit,-mode,-...1) %>% 
+  rename("Country"="region") %>% 
+  group_by(year,powertrain) %>% 
+  summarize(total_charging_points_per_year = sum(value))
+
+total_charging_points_by_year
+```
+
+##Regression Modeling ###First, combine these three datasets
+
+```{r}
+Global_merged <- ev_data_by_sales %>% 
+  inner_join(total_electricity_by_year,by="year") %>% 
+  inner_join(total_charging_points_by_year,by="year")
+
+Global_merged
+```
+
+##Correlation
+
+```{r}
+cor(Global_merged$total_sale_per_year, Global_merged$total_electricity_per_year)
+
+cor(Global_merged$total_sale_per_year, Global_merged$total_charging_points_per_year)
+```
+
+##Multi-variate linear regression
+
+```{r}
+model <- lm(total_sale_per_year ~ total_electricity_per_year + total_charging_points_per_year, data = Global_merged)
+summary(model)
+
+```
+
+*Plot*
+
+-   Maybe linear method isn't adaptable to this case???
+
+**Total Charging Points**
+
+```{r}
+Global_merged %>% ggplot(aes(y = total_sale_per_year, x = total_charging_points_per_year, color = powertrain)) +
+  geom_smooth(size = 1) +
+  geom_point(size = 2) +
+  labs(title = "Total Charging Points per Year",
+       y = "total sale per year",
+       x = "total charging points per year") +
+  theme_minimal()
+```
+
+**total electricity production**
+
+```{r}
+Global_merged %>% ggplot(aes(y = total_sale_per_year, x = total_electricity_per_year)) +
+  geom_smooth(size = 1.5,se = F,color = 'lightpink') +
+  geom_point(size = 2) +
+  labs(title = "Total Charging Points per Year",
+       y = "total_sale_per_year",
+       x = "total_electricity_per_year") +
+  theme_minimal()
+```
+
+#To find the country best positioned in this transition
+
+## electricity production
+
+```{r}
+total_electricity_by_country <- energy_production %>% 
+  filter(Product=="Electricity",!Country %in% c('OECD Total',"EA Total","OECD Europe","OECD Asia Oceania",'OECD Americas','IEA Total')) %>% 
+  rename("energy_production"="Value") %>%
+  group_by(Country) %>% 
+  summarize(total_electricity_by_country = sum(energy_production),Unit = 'GWh') %>% 
+  arrange(desc(total_electricity_by_country)) %>% 
+  head(10)
+
+total_electricity_by_country
+```
+
+##charging points
+
+```{r}
+total_charging_points_by_country <- ev_chargers %>%
+  group_by(region) %>% 
+  filter(!region %in% c('World',"Europe","EU27")) %>% 
+  summarize(total_charging_points_by_country = sum(value)) %>% 
+  arrange(desc(total_charging_points_by_country)) %>% 
+  head(10)
+
+total_charging_points_by_country
+```
+
+#Finally,make a metric, showing how much electricity is available per charging point and scales it by the total EV sales, which gives you an idea of how effectively the infrastructure supports EV adoption.
+
+$$
+{Influence\ Metric} = \left(\frac{\text{Total Electricity Production}}{\text{Total Charging Points}}\right) \times \text{EV Sales}
+$$
+
+-   Since top10 countries in EV sale, electricity production, and charging points are different, we also include Korea, India, and Italy into consideration (as a complement of top10 EV sales).
+-   So now we have 13 countries:China, USA, Germany, United Kingdom, France, Norway, Netherlands, Japan, Sweden, Canada,Korea, India, and Italy.
+
+```{r}
+US_metric <- read.csv("~/Desktop/Data Challenge/Data Challenge/CODE/Metrics/US_metric.csv")
+Canada_metric <- read.csv("~/Desktop/Data Challenge/Data Challenge/CODE/Metrics/Canada_metric.csv")
+China_metric <- read.csv("~/Desktop/Data Challenge/Data Challenge/CODE/Metrics/China_metric.csv")
+Japan_metric <- read.csv("~/Desktop/Data Challenge/Data Challenge/CODE/Metrics/Japan_metric.csv")
+UK_metric <- read.csv("~/Desktop/Data Challenge/Data Challenge/CODE/Metrics/UK_metric.csv")
+France_metric <- read.csv("~/Desktop/Data Challenge/Data Challenge/CODE/Metrics/France_metric.csv")
+Germany_metric <- read.csv("~/Desktop/Data Challenge/Data Challenge/CODE/Metrics/Germany_metric.csv")
+Norway_metric <- read.csv("~/Desktop/Data Challenge/Data Challenge/CODE/Metrics/Norway_metric.csv")
+Sweden_metric <- read.csv("~/Desktop/Data Challenge/Data Challenge/CODE/Metrics/Sweden_metric.csv")
+Korea_metric <- read.csv("~/Desktop/Data Challenge/Data Challenge/CODE/Metrics/Korea_metric.csv")
+India_metric <- read.csv("~/Desktop/Data Challenge/Data Challenge/CODE/Metrics/India_metric.csv")
+Italy_metric <- read.csv("~/Desktop/Data Challenge/Data Challenge/CODE/Metrics/Italy_metric.csv")
+
+df_US <- tibble(year = 2010:2021, influence_metric = US_metric$influence_metric)
+df_Canada <- tibble(year = 2010:2021, influence_metric = Canada_metric$influence_metric)
+df_China <- tibble(year = 2015:2021, influence_metric = China_metric$influence_metric)  # Shorter range
+df_Japan <- tibble(year = 2010:2021,influence_metric = Japan_metric$influence_metric)
+df_UK <- tibble(year = 2010:2021,influence_metric = UK_metric$influence_metric)
+df_France <- tibble(year = 2010:2021,influence_metric = France_metric$influence_metric)
+df_Germany <- tibble(year = 2010:2021,influence_metric = Germany_metric$influence_metric)
+df_Netherlands <- tibble(year = 2010:2021,influence_metric = Germany_metric$influence_metric)
+df_Norway <- tibble(year = 2010:2021,influence_metric = Norway_metric$influence_metric)
+df_Sweden <- tibble(year = 2010:2021,influence_metric = Sweden_metric$influence_metric)
+df_Korea <- tibble(year = 2010:2021,influence_metric = Korea_metric$influence_metric)
+df_India <- tibble(year = 2015:2021,influence_metric = India_metric$influence_metric)
+df_Italy <- tibble(year = 2010:2021,influence_metric = Italy_metric$influence_metric)
+
+
+influence_metrics <- bind_rows(
+  df_US %>% mutate(country = "US"),
+  df_Canada %>% mutate(country = "Canada"),
+  df_China %>% mutate(country = "China"),
+  df_Japan %>% mutate(country = "Japan"),
+  df_UK %>% mutate(country = "UK"),
+  df_France %>% mutate(country = "France"),
+  df_Germany %>% mutate(country = "Germany"),
+  df_Netherlands %>% mutate(country = "Netherlands"),
+  df_Norway %>% mutate(country = "Norway"),
+  df_Sweden %>% mutate(country = "Sweden"),
+  df_Korea %>% mutate(country = "Korea"),
+  df_India %>% mutate(country = "India"),
+  df_Italy %>% mutate(country = "Italy")
+) #%>% pivot_wider(names_from = country, values_from = influence_metric)
+
+write.csv(influence_metrics,"~/Desktop/Data Challenge/Data Challenge/CODE/Metrics/influence_metrics.csv",row.names = FALSE)
+print(influence_metrics)
+```
+
+```{r}
+ggplot(influence_metrics, aes(x = year, y = influence_metric, color = country)) +                        # Add transparency to points
+  geom_smooth(se = FALSE, method = "loess", size = 0.8) + # Adjust line size
+  scale_y_continuous(trans = 'log10',                  # Use a log scale for y-axis
+                     labels = scales::comma) +         # Format y-axis labels
+  scale_color_viridis_d(option = "H") +           # Use a distinct color palette
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    legend.title = element_blank(),
+    legend.text = element_text(size = 8),                 # Adjust legend text size
+    plot.title = element_text(hjust = 0.5)
+  ) +
+  labs(
+    x = "Year",
+    y = "Influence Metric (Log Scale)",
+    title = "Influence Metric Trends by Country"
+  )
+
+```
+
